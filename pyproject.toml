@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "blastgrid"
+version = "1.0.0"
+description = "Skill manager for AI coding agents"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+keywords = ["antigravity", "skills", "ai", "agent", "tui", "retro"]
+dependencies = [
+    "textual>=0.50.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+blastgrid = "blastgrid.__main__:main"

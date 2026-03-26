@@ -1,0 +1,178 @@
+Screen {
+    background: #080812;
+    color: #b8c8d8;
+}
+
+#title-bar {
+    dock: top;
+    height: 1;
+    background: #001a66;
+    color: #ffffff;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#hud {
+    dock: bottom;
+    height: 1;
+    background: #06060e;
+    color: #00ee88;
+    padding: 0 1;
+}
+
+Footer {
+    background: #0a0a18;
+    color: #4a6a8a;
+}
+
+Footer > .footer--key {
+    background: #0e1a30;
+    color: #00ccff;
+}
+
+Footer > .footer--description {
+    color: #4a6a8a;
+}
+
+ContentSwitcher {
+    height: 1fr;
+}
+
+#dashboard {
+    padding: 0 1;
+}
+
+#dash-ctx {
+    height: auto;
+    margin: 0 0 0 0;
+}
+
+#dash-row {
+    height: auto;
+    min-height: 12;
+}
+
+#dash-chart {
+    width: 2fr;
+}
+
+#dash-leaders {
+    width: 1fr;
+}
+
+#dash-tiers {
+    height: auto;
+}
+
+#dash-feed {
+    height: auto;
+    max-height: 10;
+}
+
+#dash-agents {
+    height: auto;
+}
+
+#armory {
+    padding: 0;
+}
+
+#search {
+    dock: top;
+    height: 3;
+    margin: 0 1;
+    background: #0c1222;
+    color: #a0b8d0;
+    border: heavy #1a2a4a;
+}
+
+#search:focus {
+    border: heavy #00ccff;
+}
+
+#grid {
+    height: 1fr;
+}
+
+DataTable {
+    background: #0a0e18;
+    color: #b0c0d0;
+    scrollbar-background: #0a0e18;
+    scrollbar-color: #1a2a4a;
+    scrollbar-color-active: #00ccff;
+    scrollbar-color-hover: #2a4a6a;
+}
+
+DataTable > .datatable--header {
+    background: #0e1630;
+    color: #00bbff;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: #1a2800;
+    color: #ffcc00;
+    text-style: bold;
+}
+
+DataTable > .datatable--even-row {
+    background: #080c16;
+}
+
+DataTable > .datatable--odd-row {
+    background: #0a1020;
+}
+
+#hunt {
+    padding: 0 2;
+}
+
+#hunt-header {
+    dock: top;
+    height: 3;
+    padding: 0 1;
+    color: #ff44aa;
+    text-style: bold;
+}
+
+#hunt-agents {
+    dock: top;
+    height: 2;
+    padding: 0 1;
+    background: #0a1020;
+    border-bottom: solid #1a2a4a;
+}
+
+#hunt-grid {
+    height: 1fr;
+}
+
+#hunt-footer {
+    dock: bottom;
+    height: 1;
+    color: #6a7a9a;
+    padding: 0 1;
+}
+
+#secured {
+    padding: 0 2;
+}
+
+#sec-header {
+    dock: top;
+    height: 4;
+    padding: 0 1;
+    color: #00ccff;
+    text-style: bold;
+}
+
+#sec-grid {
+    height: 1fr;
+}
+
+#sec-footer {
+    dock: bottom;
+    height: 1;
+    color: #6a7a9a;
+    padding: 0 1;
+}
