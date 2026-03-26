@@ -21,9 +21,20 @@ from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher, DataTable, Footer, Input, Static
 
 from .agents import get_active_agents, get_all_skill_dirs, AgentDef
-from .db import CONTEXT_BUDGET, GRAVEYARD, VAULT, GridStats, SkillDB, SkillRecord, AgentStats, UsageTier
+from .db import (
+    CONTEXT_BUDGET,
+    GRAVEYARD,
+    VAULT,
+    WATCH_AGENT_ID,
+    GridStats,
+    SkillDB,
+    SkillRecord,
+    AgentStats,
+    UsageTier,
+)
 from .live import DaemonState, _chart, _leaderboard, _feed, _usage_breakdown
 from .scanner import scan_all_agents
+from .vault_ops import stash_in_vault
 
 
 AGENT_GLYPHS = {
@@ -39,6 +50,7 @@ AGENT_GLYPHS = {
     "roo":         ("⊕", "bright_red"),
     "opencode":    ("◎", "yellow"),
     "agents":      ("●", "cyan"),
+    "watch":       ("◉", "bright_magenta"),
 }
 
 
@@ -783,10 +795,10 @@ class BlastGridApp(App):
 
         if is_mac and is_root:
             state.backend = "fs_usage"
-            fn = lambda: dm._daemon_fs_usage(self.db, patterns)
+            fn = lambda: dm._daemon_fs_usage(self.db, patterns, skill_map)
         elif is_linux and shutil.which("inotifywait"):
             state.backend = "inotifywait"
-            fn = lambda: dm._daemon_inotifywait(self.db, patterns, watch_dirs)
+            fn = lambda: dm._daemon_inotifywait(self.db, patterns, watch_dirs, skill_map)
         else:
             state.backend = "atime-poll"
             fn = lambda: dm._daemon_python(self.db, skill_map)
@@ -903,14 +915,14 @@ class BlastGridApp(App):
         if not skill:
             return
         src = Path(skill.path)
-        VAULT.mkdir(parents=True, exist_ok=True)
-        dest = VAULT / f"{skill.agent}__{skill.name}"
-        if dest.exists():
-            dest = VAULT / f"{skill.agent}__{skill.name}_{int(time.time())}"
-        if src.is_dir():
-            shutil.move(str(src), str(dest))
-        self.db.delete_skill(sid)
-        self.notify(f"📦 {skill.name} → VAULT (restorable)", severity="information")
+        if not src.exists():
+            self.notify("Path no longer exists", severity="warning")
+            return
+        if stash_in_vault(src, VAULT, skill.agent, skill.name):
+            self.db.delete_skill(sid)
+            self.notify(f"📦 {skill.name} → VAULT (restorable)", severity="information")
+        else:
+            self.notify("Vault failed", severity="error")
 
     def _graveyard_skill(self, sid: str) -> None:
         if not self.db:
@@ -919,14 +931,14 @@ class BlastGridApp(App):
         if not skill:
             return
         src = Path(skill.path)
-        GRAVEYARD.mkdir(parents=True, exist_ok=True)
-        dest = GRAVEYARD / f"{skill.agent}__{skill.name}"
-        if dest.exists():
-            dest = GRAVEYARD / f"{skill.agent}__{skill.name}_{int(time.time())}"
-        if src.is_dir():
-            shutil.move(str(src), str(dest))
-        self.db.delete_skill(sid)
-        self.notify(f"⚔ {skill.name} → GRAVEYARD", severity="warning")
+        if not src.exists():
+            self.notify("Path no longer exists", severity="warning")
+            return
+        if stash_in_vault(src, GRAVEYARD, skill.agent, skill.name):
+            self.db.delete_skill(sid)
+            self.notify(f"⚔ {skill.name} → GRAVEYARD", severity="warning")
+        else:
+            self.notify("Graveyard move failed", severity="error")
 
     def action_vault_selected(self):
         if self.current_view == "hunt":
@@ -997,14 +1009,12 @@ class BlastGridApp(App):
         freed = 0
         for g in marked:
             src = Path(g.path)
-            dest = GRAVEYARD / f"{g.agent}__{g.name}"
-            if dest.exists():
-                dest = GRAVEYARD / f"{g.agent}__{g.name}_{int(time.time())}"
-            if src.is_dir():
-                shutil.move(str(src), str(dest))
-            sid = self.db.skill_id(g.agent, g.name)
-            self.db.delete_skill(sid)
-            freed += g.token_count
+            if not src.exists():
+                continue
+            if stash_in_vault(src, GRAVEYARD, g.agent, g.name):
+                sid = self.db.skill_id(g.agent, g.name)
+                self.db.delete_skill(sid)
+                freed += g.token_count
 
         self.notify(
             f"⚔ VANQUISHED {len(marked)} ghosts! {freed:,} tokens freed",
@@ -1056,16 +1066,14 @@ class BlastGridApp(App):
         freed = 0
         for g in candidates:
             src = Path(g.path)
-            dest = VAULT / f"{g.agent}__{g.name}"
-            if dest.exists():
-                dest = VAULT / f"{g.agent}__{g.name}_{int(time.time())}"
+            if not src.exists():
+                continue
             try:
-                if src.is_dir():
-                    shutil.move(str(src), str(dest))
-                sid = self.db.skill_id(g.agent, g.name)
-                self.db.delete_skill(sid)
-                moved += 1
-                freed += g.token_count
+                if stash_in_vault(src, VAULT, g.agent, g.name):
+                    sid = self.db.skill_id(g.agent, g.name)
+                    self.db.delete_skill(sid)
+                    moved += 1
+                    freed += g.token_count
             except Exception:
                 pass
         self._refresh_all()
@@ -1097,6 +1105,7 @@ class BlastGridApp(App):
         if result != "restore_all":
             return
         from .agents import get_agent
+        from .vault_ops import restore_watch_vault_folder
         if not VAULT.is_dir():
             return
         items = sorted(VAULT.iterdir())
@@ -1112,8 +1121,14 @@ class BlastGridApp(App):
             agent_id, skill_name = parts
             if "_" in skill_name and skill_name.rsplit("_", 1)[-1].isdigit():
                 skill_name = skill_name.rsplit("_", 1)[0]
+            if agent_id == WATCH_AGENT_ID:
+                if restore_watch_vault_folder(item):
+                    restored += 1
+                else:
+                    failed += 1
+                continue
             agent_def = get_agent(agent_id)
-            if not agent_def:
+            if not agent_def or not agent_def.global_dirs:
                 failed += 1
                 continue
             dest = agent_def.global_dirs[0] / skill_name
@@ -1172,6 +1187,14 @@ class BlastGridApp(App):
         self.query_one("#secured", SecuredView).load_data(
             secured, stats.total,
         )
+        self._sync_agent_tabs()
+
+    def _sync_agent_tabs(self):
+        base = [""] + [a.id for a in get_active_agents()]
+        if self.db and self.db.get_all(agent_filter=WATCH_AGENT_ID):
+            if WATCH_AGENT_ID not in base:
+                base.append(WATCH_AGENT_ID)
+        self._agents = base
 
     def _update_title_bar(self):
         views = [

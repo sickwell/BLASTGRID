@@ -10,6 +10,22 @@ BLASTGRID tracks real skill usage, shows what is dead weight, and lets you clean
 
 Supports 12 agents: Antigravity, Claude Code, Cursor, Gemini CLI, Codex CLI, Kiro, GitHub Copilot, Windsurf, Junie (JetBrains), Roo Code, OpenCode, and the shared `.agents` standard. If a directory exists on your machine, BLASTGRID picks it up automatically.
 
+### Extra paths (`watch.conf`)
+
+Create `~/.blastgrid/watch.conf` with one absolute path per line (shell-style `~` is OK). Lines starting with `#` are comments. Each path may be a **file** or a **directory**; directories are scanned recursively (`.git` is skipped). Those files appear in the UI under agent `watch` and are tracked by the same daemon backends as skills. Large trees can mean many files — keep the list focused.
+
+Example:
+
+```
+# My prompts project
+~/Projects/prompts/rules.md
+
+# Whole notes folder
+/home/you/notes
+```
+
+After editing, press F5 in the TUI or run `blastgrid scan`. Vault restore for single vaulted watch files uses a `.blastgrid-origin` marker inside the vault folder.
+
 ## Install
 
 ```
@@ -83,6 +99,7 @@ Key bindings:
 | File | Purpose |
 |------|---------|
 | `blastgrid.db` | Skills, usage counts, tags (SQLite) |
+| `watch.conf` | Optional: extra files/dirs to track (one path per line) |
 | `vault/` | Backed-up skills (restorable) |
 | `graveyard/` | Deleted skills |
 | `usage.log` | JSON lines access log (10 MB rotation) |
@@ -103,6 +120,7 @@ Key bindings:
 | Roo Code | `~/.roo/skills/` |
 | OpenCode | `~/.config/opencode/skills/` |
 | Shared | `~/.agents/skills/` |
+| watch.conf extras | Paths listed in `~/.blastgrid/watch.conf` (any files; agent column shows `watch`) |
 
 Run `blastgrid agents` to see what's detected on your machine.
 

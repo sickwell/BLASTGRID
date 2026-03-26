@@ -8,7 +8,9 @@ DB_PATH = Path.home() / ".blastgrid" / "blastgrid.db"
 GRAVEYARD = Path.home() / ".blastgrid" / "graveyard"
 VAULT = Path.home() / ".blastgrid" / "vault"
 LOG_PATH = Path.home() / ".blastgrid" / "usage.log"
+WATCH_CONF = Path.home() / ".blastgrid" / "watch.conf"
 CONTEXT_BUDGET = 180_000
+WATCH_AGENT_ID = "watch"
 LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB rotation
 
 

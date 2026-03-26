@@ -35,6 +35,7 @@ AGENT_GLYPHS = {
     "roo":         ("⊕", "bright_red"),
     "opencode":    ("◎", "yellow"),
     "agents":      ("●", "cyan"),
+    "watch":       ("◉", "bright_magenta"),
 }
 
 

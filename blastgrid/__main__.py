@@ -3,13 +3,17 @@ from __future__ import annotations
 import json
 import os
 import platform
+import queue
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from .db import WATCH_AGENT_ID
 
 
 def cli_scan():
@@ -126,13 +130,141 @@ def _get_skill_regex_patterns():
 
 
 def _build_skill_file_map(db) -> dict[str, tuple[str, str, str]]:
-    result = {}
+    result: dict[str, tuple[str, str, str]] = {}
     skills = db.get_all()
     for s in skills:
-        md_path = str(Path(s.path) / "SKILL.md")
         sid = db.skill_id(s.agent, s.name)
+        if s.agent == WATCH_AGENT_ID:
+            fp = str(Path(s.path))
+            if Path(fp).is_file():
+                result[fp] = (s.agent, s.name, sid)
+            continue
+        md_path = str(Path(s.path) / "SKILL.md")
         result[md_path] = (s.agent, s.name, sid)
     return result
+
+
+def _watch_paths_for_fs_usage(skill_map: dict[str, tuple[str, str, str]]):
+    return sorted(
+        [(p, skill_map[p]) for p in skill_map if skill_map[p][0] == WATCH_AGENT_ID],
+        key=lambda t: len(t[0]),
+        reverse=True,
+    )
+
+
+def _daemon_inotify_wait(
+    proc: subprocess.Popen,
+    q: queue.Queue,
+):
+    try:
+        out = proc.stdout
+        if not out:
+            return
+        for line in out:
+            q.put(line)
+    except Exception:
+        pass
+
+
+def _daemon_inotifywait(
+    db,
+    patterns,
+    dirs: list[str],
+    skill_map: dict[str, tuple[str, str, str]],
+):
+    watch_files = sorted(
+        p for p, (a, _, _) in skill_map.items() if a == WATCH_AGENT_ID
+    )
+    q: queue.Queue[str | None] = queue.Queue()
+    procs: list[subprocess.Popen] = []
+
+    if dirs:
+        procs.append(
+            subprocess.Popen(
+                [
+                    "inotifywait", "-m", "-r",
+                    "-e", "access",
+                    "--include", r"SKILL\.md",
+                    "--format", "%w%f",
+                ] + dirs,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+        )
+    if watch_files:
+        procs.append(
+            subprocess.Popen(
+                [
+                    "inotifywait", "-m",
+                    "-e", "access",
+                    "--format", "%w%f",
+                ] + watch_files,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+        )
+
+    for proc in procs:
+        threading.Thread(
+            target=_daemon_inotify_wait,
+            args=(proc, q),
+            daemon=True,
+        ).start()
+
+    if not procs:
+        return
+
+    if not _live_mode:
+        print(
+            f"  Backend: inotifywait (agent dirs: {len(dirs)}, "
+            f"extra files: {len(watch_files)})\n"
+        )
+
+    last_status = time.time()
+    while True:
+        try:
+            line = q.get(timeout=30.0)
+        except queue.Empty:
+            line = None
+        if line is None:
+            if not _live_mode:
+                now = time.time()
+                if now - last_status >= 30:
+                    last_status = now
+                    elapsed = _fmt_elapsed(_session_start)
+                    print(
+                        f"  [{elapsed}] ● session: {len(_session_unique)} unique, "
+                        f"{_session_hits} hits"
+                    )
+            continue
+
+        last_status = time.time()
+        row = line.strip()
+        if not row:
+            continue
+        matched = False
+        for regex, agent_id in patterns:
+            m = regex.search(row)
+            if m:
+                name = m.group(1)
+                sid = f"{agent_id}:{name}"
+                _log_hit(db, agent_id, name, sid, "daemon")
+                matched = True
+                break
+        if not matched:
+            npath = os.path.normpath(row)
+            for fp, (agent_id, name, sid) in skill_map.items():
+                if agent_id != WATCH_AGENT_ID:
+                    continue
+                try:
+                    if os.path.normpath(fp) == npath:
+                        _log_hit(db, agent_id, name, sid, "daemon")
+                        matched = True
+                        break
+                except OSError:
+                    continue
 
 
 def _fmt_elapsed(start: float) -> str:
@@ -192,7 +324,12 @@ def _log_hit(db, agent_id: str, name: str, sid: str, source: str):
     except Exception:
         pass
 
-def _daemon_fs_usage(db, patterns):
+def _daemon_fs_usage(
+    db,
+    patterns,
+    skill_map: dict[str, tuple[str, str, str]],
+):
+    watch_pairs = _watch_paths_for_fs_usage(skill_map)
     if not _live_mode:
         print("  Backend: fs_usage (precise, real-time)\n")
     proc = subprocess.Popen(
@@ -203,60 +340,32 @@ def _daemon_fs_usage(db, patterns):
     )
     last_status = time.time()
     for line in proc.stdout:
-        if "SKILL" not in line:
-            if not _live_mode:
-                now = time.time()
-                if now - last_status >= 30:
-                    last_status = now
-                    elapsed = _fmt_elapsed(_session_start)
-                    print(
-                        f"  [{elapsed}] ● session: {len(_session_unique)} unique, "
-                        f"{_session_hits} hits"
-                    )
-            continue
-        for regex, agent_id in patterns:
-            m = regex.search(line)
-            if m:
-                name = m.group(1)
-                sid = f"{agent_id}:{name}"
-                _log_hit(db, agent_id, name, sid, "daemon")
-                break
+        matched = False
+        if "SKILL" in line:
+            for regex, agent_id in patterns:
+                m = regex.search(line)
+                if m:
+                    name = m.group(1)
+                    sid = f"{agent_id}:{name}"
+                    _log_hit(db, agent_id, name, sid, "daemon")
+                    matched = True
+                    break
+        if not matched and watch_pairs:
+            for fp, (agent_id, name, sid) in watch_pairs:
+                if fp in line:
+                    _log_hit(db, agent_id, name, sid, "daemon")
+                    matched = True
+                    break
+        if not matched and not _live_mode:
+            now = time.time()
+            if now - last_status >= 30:
+                last_status = now
+                elapsed = _fmt_elapsed(_session_start)
+                print(
+                    f"  [{elapsed}] ● session: {len(_session_unique)} unique, "
+                    f"{_session_hits} hits"
+                )
 
-def _daemon_inotifywait(db, patterns, dirs: list[str]):
-    if not _live_mode:
-        print(f"  Backend: inotifywait (watching {len(dirs)} dirs, real-time)\n")
-    proc = subprocess.Popen(
-        [
-            "inotifywait", "-m", "-r",
-            "-e", "access",
-            "--include", r"SKILL\.md",
-            "--format", "%w%f",
-        ] + dirs,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
-    last_status = time.time()
-    for line in proc.stdout:
-        line = line.strip()
-        if not line:
-            if not _live_mode:
-                now = time.time()
-                if now - last_status >= 30:
-                    last_status = now
-                    elapsed = _fmt_elapsed(_session_start)
-                    print(
-                        f"  [{elapsed}] ● session: {len(_session_unique)} unique, "
-                        f"{_session_hits} hits"
-                    )
-            continue
-        for regex, agent_id in patterns:
-            m = regex.search(line)
-            if m:
-                name = m.group(1)
-                sid = f"{agent_id}:{name}"
-                _log_hit(db, agent_id, name, sid, "daemon")
-                break
 
 def _test_atime_priming(sample_path: str) -> bool:
     """Verify atime priming: set atime before mtime, read, check atime updated."""
@@ -300,7 +409,7 @@ def _daemon_python(db, skill_map: dict[str, tuple[str, str, str]]):
 
     if not _live_mode:
         print(f"  Backend: Python atime polling (interval: 1s)")
-        print(f"  Priming {len(skill_map)} SKILL.md files...")
+        print(f"  Priming {len(skill_map)} file(s)...")
 
     for path in skill_map:
         try:
@@ -366,7 +475,6 @@ def _daemon_python(db, skill_map: dict[str, tuple[str, str, str]]):
 
 def cli_daemon():
     global _session_start, _session_hits, _session_unique, _daemon_state, _live_mode
-    import threading
 
     from .agents import get_all_skill_dirs
     from .db import SkillDB
@@ -397,11 +505,11 @@ def cli_daemon():
     if is_mac and is_root:
         backend_name = "fs_usage"
         def _run_backend():
-            _daemon_fs_usage(db, patterns)
+            _daemon_fs_usage(db, patterns, skill_map)
     elif is_linux and shutil.which("inotifywait"):
         backend_name = "inotifywait"
         def _run_backend():
-            _daemon_inotifywait(db, patterns, watch_dirs)
+            _daemon_inotifywait(db, patterns, watch_dirs, skill_map)
     else:
         backend_name = "atime-poll"
         def _run_backend():
@@ -621,8 +729,17 @@ def cli_restore(args: list[str]):
         return
 
     agent_id, skill_name = parts
+    if agent_id == WATCH_AGENT_ID:
+        from .vault_ops import restore_watch_vault_folder
+        if restore_watch_vault_folder(src):
+            print(f"  ✓ Restored watch.conf file to its original path")
+            print(f"    Run 'blastgrid scan' to update the database")
+        else:
+            print(f"  ✗ Could not restore watch vault item (missing .blastgrid-origin?)")
+        return
+
     agent_def = get_agent(agent_id)
-    if not agent_def:
+    if not agent_def or not agent_def.global_dirs:
         print(f"  ✗ Unknown agent: {agent_id}")
         return
 
@@ -677,7 +794,8 @@ def main():
             "  blastgrid agents       Show agents & paths\n"
             "  blastgrid tag <keep|remove|clear> <agent:name>\n"
             "  blastgrid restore      List vault/graveyard\n"
-            "  blastgrid restore <agent__name> [--graveyard]\n\n"
+            "  blastgrid restore <agent__name> [--graveyard]\n"
+            "  ~/.blastgrid/watch.conf — optional extra paths to track\n\n"
             "TUI keys:\n"
             "  1/2/3/4  DASHBOARD / ARMORY / HUNT / SECURED\n"
             "  TAB      Cycle agent filter\n"

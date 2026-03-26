@@ -128,6 +128,13 @@ _AGENTS: list[AgentDef] = [
         ),
         session_hint="cross-agent standard",
     ),
+    AgentDef(
+        id="watch",
+        name="watch.conf",
+        color="bright_magenta",
+        global_dirs=tuple(),
+        session_hint="~/.blastgrid/watch.conf",
+    ),
 ]
 
 
