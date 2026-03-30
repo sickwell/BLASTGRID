@@ -11,7 +11,7 @@ def stash_in_vault(src: Path, vault_root: Path, agent: str, name: str) -> Path |
         vault_root.mkdir(parents=True, exist_ok=True)
         dest = vault_root / f"{agent}__{name}"
         if dest.exists():
-            dest = vault_root / f"{agent}__{name}_{int(time.time())}"
+            dest = vault_root / f"{agent}__{name}~~{int(time.time())}"
         if src.is_file():
             dest.mkdir(parents=True, exist_ok=True)
             (dest / ".blastgrid-origin").write_text(

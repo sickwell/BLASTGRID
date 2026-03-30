@@ -1087,7 +1087,7 @@ class BlastGridApp(App):
         if not VAULT.is_dir():
             self.notify("Vault is empty", severity="warning")
             return
-        items = sorted(VAULT.iterdir())
+        items = sorted(d for d in VAULT.iterdir() if d.is_dir())
         if not items:
             self.notify("Vault is empty", severity="warning")
             return
@@ -1119,8 +1119,8 @@ class BlastGridApp(App):
                 failed += 1
                 continue
             agent_id, skill_name = parts
-            if "_" in skill_name and skill_name.rsplit("_", 1)[-1].isdigit():
-                skill_name = skill_name.rsplit("_", 1)[0]
+            if "~~" in skill_name:
+                skill_name = skill_name.rsplit("~~", 1)[0]
             if agent_id == WATCH_AGENT_ID:
                 if restore_watch_vault_folder(item):
                     restored += 1

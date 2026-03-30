@@ -729,6 +729,9 @@ def cli_restore(args: list[str]):
         return
 
     agent_id, skill_name = parts
+    # Strip dedup suffix (~~<timestamp>) added by vault when name already existed
+    if "~~" in skill_name:
+        skill_name = skill_name.rsplit("~~", 1)[0]
     if agent_id == WATCH_AGENT_ID:
         from .vault_ops import restore_watch_vault_folder
         if restore_watch_vault_folder(src):

@@ -100,12 +100,21 @@ class SkillDB:
             CREATE INDEX IF NOT EXISTS idx_sk_agent   ON skills(agent);
             CREATE INDEX IF NOT EXISTS idx_sk_name    ON skills(name);
         """)
+        # Probe whether the CHECK constraint allows 'secure'.
+        # We insert a dummy row, then immediately delete it.
+        # If the old CHECK rejects 'secure', we recreate the table.
+        needs_recreate = False
         try:
             self.conn.execute(
-                "UPDATE skills SET tag='secure' WHERE tag='secure'"
+                "INSERT INTO skills (id, name, path, agent, first_seen, tag) "
+                "VALUES ('__probe__','__probe__','__probe__','__probe__','__probe__','secure')"
             )
+            self.conn.execute("DELETE FROM skills WHERE id='__probe__'")
+            self.conn.commit()
         except sqlite3.IntegrityError:
-            # Old CHECK doesn't allow 'secure' — recreate table
+            needs_recreate = True
+
+        if needs_recreate:
             self.conn.executescript("""
                 ALTER TABLE skills RENAME TO _skills_old;
                 CREATE TABLE skills (
